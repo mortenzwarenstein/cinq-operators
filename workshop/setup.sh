@@ -4,8 +4,8 @@ set -euo pipefail
 echo "Setting up operator workshop environment"
 echo "### KUBEBUILDER (1/) ###"
 
-HACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$HACK_DIR")"
+WORKSHOP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$WORKSHOP_DIR")"
 KUBEBUILDER="kubebuilder"
 BIN_PATH=$REPO_ROOT/$KUBEBUILDER
 
@@ -26,10 +26,10 @@ else
 fi
 
 echo "### KIND CLUSTER (2/) ###"
-docker compose -f "$HACK_DIR/docker-compose.yaml" run --rm kind
+docker compose -f "$WORKSHOP_DIR/docker-compose.yaml" run --rm kind
 
 echo "### DEPLOYING DB ###"
-export KUBECONFIG="$HACK_DIR/kubeconfig.yaml"
+export KUBECONFIG="$WORKSHOP_DIR/kubeconfig.yaml"
 
 echo "Waiting for the cluster to be ready"
 for i in $(seq 1 60); do
@@ -40,4 +40,4 @@ for i in $(seq 1 60); do
   sleep 2
 done
 
-kubectl apply -f "$HACK_DIR/postgres.yaml"
+kubectl apply -f "$WORKSHOP_DIR/postgres.yaml"
