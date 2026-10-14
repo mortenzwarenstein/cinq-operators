@@ -1,0 +1,25 @@
+services:
+  kind:
+    image: "docker:cli"
+    restart: "no"
+    environment:
+      - KIND_VERSION=v0.31.0
+      - CLUSTER_NAME=operator-workshop
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./kind-config.yaml:/kind-config.yaml:ro
+      - .:/output
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        arch=$$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+        wget -qO /usr/local/bin/kind "https://kind.sigs.k8s.io/dl/$${KIND_VERSION}/kind-linux-$${arch}"
+        chmod +x /usr/local/bin/kind
+        if kind get clusters | grep -qx "$${CLUSTER_NAME}"; then
+          echo "Cluster $${CLUSTER_NAME} already exists"
+        else
+          kind create cluster --name "$${CLUSTER_NAME}" --config /kind-config.yaml --wait 120s
+        fi
+        kind get kubeconfig --name "$${CLUSTER_NAME}" > /output/kubeconfig.yaml
+        chmod 666 /output/kubeconfig.yaml
