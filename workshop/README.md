@@ -21,3 +21,17 @@ In deze workshop gaan we aan de slag met een database upgrade. We migreren Postg
    - Check: `kubectl get pods -n postgres-example` of de database is gestart. 
    - Check of je kunt verbinden (gebruik je favo tool & `kubectl port-forward <pod_name> 5432:5432`). 
    - Run `SELECT version();`. Output zou aan moeten geven dat het om Postgres 16 gaat.
+
+## Stap 0: De CRD
+Een van de handige tools van Kubebuilder is de mogelijkheid om een Custom Resource Definition (CRD) vanuit de code te 
+genereren, dus let's get started.
+1. Gebruik `kubebuilder create api` om een `API` te genereren. De volgende params kunnen worden meegegeven: 
+   - `--group`: Dit is de functionele groep waaronder de CRD valt - in dit geval volstaat `database`
+   - `--version`: Dit is de versie van de CRD. 't Is de eerste versie, dus: `v1`
+   - `--kind`: Dit is de naam van de CRD: We gaan `Postgres` managen, dus je raadt het al: `Postgres`
+   - Voor de volledigheid: `kubebuilder create api --group database --version v1 --kind Postgres`
+2. Als het goed is zijn er resources aangemaakt onder `internal` en `api`
+3. Om de CRD te bewerken moeten we in `api/v1/postgres_types.go` zijn
+4. Met `make manifest` laten we `kubebuilder` daadwerkelijke manifests genereren. Let's give it a shot! 
+Verander het `Foo`-veld om te valideren. Als het goed is moet je nu in `config/samples/database_v1_postgres.yaml` een 
+voorbeeld zien staan van je eerste CRD met kubebuilder! 
