@@ -1,0 +1,6 @@
+apiVersion: database.cinqict.nl/v1
+kind: Postgres
+metadata:
+  name: postgres-sample
+spec:
+  version: 16

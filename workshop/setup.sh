@@ -7,19 +7,20 @@ echo "### KUBEBUILDER (1/) ###"
 WORKSHOP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$WORKSHOP_DIR")"
 KUBEBUILDER="kubebuilder"
-BIN_PATH=$REPO_ROOT/$KUBEBUILDER
+KUBEBUILDER_VERSION="4.16.0"
+BIN_PATH="$REPO_ROOT/$KUBEBUILDER"
 
 if [ ! -f "$BIN_PATH" ]; then
   echo "Downloading kubebuilder bin"
-  curl -L -o $BIN_PATH "https://go.kubebuilder.io/dl/latest/$(go env GOOS)/$(go env GOARCH)"
-  chmod +x $BIN_PATH
+  curl -fL -o "$BIN_PATH" "https://go.kubebuilder.io/dl/${KUBEBUILDER_VERSION}/$(go env GOOS)/$(go env GOARCH)"
+  chmod +x "$BIN_PATH"
   echo "Downloaded kubebuilder bin"
 fi
 
-cd $REPO_ROOT
+cd "$REPO_ROOT"
 
 if [ ! -f "./go.sum" ]; then
-  ./kubebuilder init --repo cinqict.nl/operators
+  ./kubebuilder init --repo cinqict.nl/operators --domain cinqict.nl
   rm -rf ./kubebuilder
 else
   echo "Project is already initialized, skipping step"
@@ -32,12 +33,19 @@ echo "### DEPLOYING DB ###"
 export KUBECONFIG="$WORKSHOP_DIR/kubeconfig.yaml"
 
 echo "Waiting for the cluster to be ready"
+cluster_ready=false
 for i in $(seq 1 60); do
   if kubectl get nodes >/dev/null 2>&1; then
+    cluster_ready=true
     break
   fi
   echo "Retrying ($i/60)"
   sleep 2
 done
+
+if [ "$cluster_ready" != true ]; then
+  echo "Cluster did not become ready after 120s, aborting" >&2
+  exit 1
+fi
 
 kubectl apply -f "$WORKSHOP_DIR/postgres.yaml"

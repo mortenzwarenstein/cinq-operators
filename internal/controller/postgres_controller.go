@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -33,9 +34,9 @@ type PostgresReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=database.my.domain,resources=postgres,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=database.my.domain,resources=postgres/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=database.my.domain,resources=postgres/finalizers,verbs=update
+// +kubebuilder:rbac:groups=database.cinqict.nl,resources=postgres,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=database.cinqict.nl,resources=postgres/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=database.cinqict.nl,resources=postgres/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -48,9 +49,13 @@ type PostgresReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.22.1/pkg/reconcile
 func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = logf.FromContext(ctx)
-
-	// TODO(user): your logic here
-
+	postgres := &databasev1.Postgres{}
+	err := r.Get(ctx, req.NamespacedName, postgres)
+	if err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	version := postgres.Spec.Version
+	fmt.Printf("The requested postgres version is %d", version)
 	return ctrl.Result{}, nil
 }
 

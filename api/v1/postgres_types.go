@@ -23,14 +23,10 @@ import (
 // Dit is je spec: Hiermee kun je je gewenste configuratie voor postgres beschrijven
 type PostgresSpec struct { // d.m.v. kubebuilder annotaties kun je validatie aan je velden toevoegen
 	// We accepteren alleen v16 en 17 en het veld is verplicht
-	// +kubebuilder:validation:Enum=16;17
+	// +kubebuilder:validation:Minimum=16
+	// +kubebuilder:validation:Maximum=17
 	// +required
 	Version int `json:"version"`
-
-	// Geef je database een storage mee
-	// +kubebuilder:default="1Gi"
-	// +optional
-	Storage string `json:"storage,omitempty"`
 }
 
 // PostgresStatus defines the observed state of Postgres.
