@@ -40,22 +40,18 @@ type PostgresReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Postgres object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.22.1/pkg/reconcile
 func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = logf.FromContext(ctx)
+	// definieer de resource, onze eigen Postgres CR
 	postgres := &databasev1.Postgres{}
+	// haal de resource op uit het cluster
 	err := r.Get(ctx, req.NamespacedName, postgres)
+	// check of er fouten in zitten
 	if err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, err
 	}
-	version := postgres.Spec.Version
-	fmt.Printf("The requested postgres version is %d", version)
+	// print de versie uit de CR
+	fmt.Printf("The requested postgres version is %d", postgres.Spec.Version)
 	return ctrl.Result{}, nil
 }
 

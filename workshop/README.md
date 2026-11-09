@@ -34,7 +34,7 @@ Een van de handige tools van Kubebuilder is de mogelijkheid om een Custom Resour
 `--resource --controller` meegeven aan bovenstaand commando)
 2. Als het goed is zijn er resources aangemaakt onder `internal` en `api`
 3. Om de CRD te bewerken moeten we in `api/v1/postgres_types.go` zijn
-4. Met `make generate` laten we `kubebuilder` daadwerkelijke manifests genereren. Let's give it a shot: 
+4. Met `make generate manifests` laten we `kubebuilder` daadwerkelijke manifests genereren. Let's give it a shot: 
 Verander het `Foo`-veld om te valideren. Als het goed is moet je nu in `config/samples/database_v1_postgres.yaml` een 
 voorbeeld zien staan van je eerste CRD met kubebuilder! 
 
@@ -42,7 +42,7 @@ voorbeeld zien staan van je eerste CRD met kubebuilder!
 de operator straks weet welke versie hij moet managen. De `PostgresSpec` is de plek om dit soort config te gaan toevoegen.
 De spec komt terug als field van `Postgres`, de uiteindelijke CRD. Voor nu houden we het simpel: We focussen ons op de
 major-versie. Voeg een `Version` veld toe met het type `int`.
-7. Beide velden hebben ook JSON-tags nodig. In `go` voeg je dit soort tags toe door *na* het veld een tag tussen
+6. Beide velden hebben ook JSON-tags nodig. In `go` voeg je dit soort tags toe door *na* het veld een tag tussen
    backticks te zetten. Hiervoor kun je `json: <veldnaam>` achter het betreffende field zetten.
 
    <details>
@@ -56,7 +56,7 @@ major-versie. Voeg een `Version` veld toe met het type `int`.
 
    </details>
 
-8. Je kunt met kubebuilder ook annotaties zetten om instructies mee te geven voor het genereren van de CRD. Hiermee kun 
+7. Je kunt met kubebuilder ook annotaties zetten om instructies mee te geven voor het genereren van de CRD. Hiermee kun 
 je op een simpele manier je CRD valideren. Kubernetes/je operator zal de CRD's ook niet accepteren als ze niet aan de 
 validatie voldoen. Ook kun je bijv. defaults zetten. Beide gaan we gebruiken. Voor nu supporten we alleen versies 16 en 
 17 voor `postgres`. De versie is verplicht (`// +required`) en we geven een min en max versie mee 
@@ -72,3 +72,42 @@ validatie voldoen. Ook kun je bijv. defaults zetten. Beide gaan we gebruiken. Vo
    Version int `json:"version"`
    }
    </details>
+8. Almost there. Laten we de daadwerkelijke CRD genereren met `make deploy`.
+9. Tijd om een minimale CRD op te zetten. `Kind: Postgres` (deze hebben we net gemaakt) en 
+`apiVersion: database.cinqict.nl/v1`. De spec is zoals je 'm geconfigureerd hebt: 
+   <details>
+   <summary>Code</summary>
+   
+   ```yaml
+      apiVersion: database.cinqict.nl/v1
+      kind: Postgres
+      metadata:
+        name: postgres-sample
+      spec:
+        version: 16 # je kunt nog 15 of 18 proberen om je validatie in werking te zien
+   ```
+   </details>
+10. Deploy de CRD: `kubectl apply -f ./workshop/kubeconfig.yaml`.
+11. We wijzigen de operator's `Reconcile` functie om te valideren dat hij de CRD oppakt.
+   <details>
+      <summary>Code</summary>
+      
+      ```go
+      func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+          _ = logf.FromContext(ctx)
+          // definieer de resource, onze eigen Postgres CR
+          postgres := &databasev1.Postgres{}
+          // haal de resource op uit het cluster
+          err := r.Get(ctx, req.NamespacedName, postgres)
+          // check of er fouten in zitten
+          if err != nil {
+              return ctrl.Result{}, err
+          }
+          // print de versie uit de CR
+          fmt.Printf("The requested postgres version is %d", postgres.Spec.Version)
+          return ctrl.Result{}, nil
+      }
+      ```
+   </details>
+12. Start de operator lokaal: `KUBECONFIG=./workshop/kubeconfig.yaml make run` of gebruik je IDE om een runconfig 
+te maken. Vergeet de environment variable niet te setten! 

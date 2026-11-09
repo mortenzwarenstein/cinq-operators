@@ -41,7 +41,7 @@ type PostgresStatus struct {
 
 /**
 
-*/
+ */
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
