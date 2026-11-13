@@ -34,7 +34,7 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: postgres
+  name: postgres-16
   namespace: postgres-example
   labels:
     app: postgres
@@ -44,14 +44,17 @@ spec:
   selector:
     matchLabels:
       app: postgres
+      version: "16"
   template:
     metadata:
       labels:
         app: postgres
+        version: "16"
     spec:
       containers:
         - name: postgres
           image: postgres:16
+          args: ["-c", "wal_level=logical"] # nodig voor de upgrade via logical replication
           ports:
             - name: postgres
               containerPort: 5432

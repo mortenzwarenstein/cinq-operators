@@ -25,6 +25,8 @@ type PostgresSpec struct { // d.m.v. kubebuilder annotaties kun je validatie aan
 	// We accepteren alleen v16 en 17 en het veld is verplicht
 	// +kubebuilder:validation:Minimum=16
 	// +kubebuilder:validation:Maximum=17
+	// Downgraden kan niet: een oudere postgres kan de data van een nieuwere niet lezen
+	// +kubebuilder:validation:XValidation:rule="self >= oldSelf",message="downgrading postgres is not supported"
 	// +required
 	Version int `json:"version"`
 }

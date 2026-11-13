@@ -51,7 +51,7 @@ var _ = Describe("Postgres Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: databasev1.PostgresSpec{Version: 16},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

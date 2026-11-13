@@ -1,6 +1,7 @@
 apiVersion: database.cinqict.nl/v1
 kind: Postgres
 metadata:
-  name: postgres-sample
+  name: postgres
+  namespace: postgres-example
 spec:
-  version: 15
+  version: 16

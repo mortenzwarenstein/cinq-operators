@@ -22,7 +22,7 @@ In deze workshop gaan we aan de slag met een database upgrade. We migreren Postg
    - Check of je kunt verbinden (gebruik je favo tool & `kubectl port-forward <pod_name> 5432:5432`). 
    - Run `SELECT version();`. Output zou aan moeten geven dat het om Postgres 16 gaat.
 
-## Stap 0: De CRD
+## Stap 1: De CRD
 Een van de handige tools van Kubebuilder is de mogelijkheid om een Custom Resource Definition (CRD, een soort van
 "config" voor de resources die je wilt deployen) vanuit de code te genereren, dus let's get started. 
 1. Gebruik `kubebuilder create api` om een `API` te genereren. De volgende params kunnen worden meegegeven: 
@@ -73,7 +73,8 @@ validatie voldoen. Ook kun je bijv. defaults zetten. Beide gaan we gebruiken. Vo
    }
    </details>
 8. Almost there. Laten we de daadwerkelijke CRD genereren met `make deploy`.
-9. Tijd om een minimale CRD op te zetten. `Kind: Postgres` (deze hebben we net gemaakt) en 
+9. Tijd om een minimale CR (CustomResource, CRD is de blauwprint, de CR is de implementatie) op te zetten.
+`Kind: Postgres` (deze hebben we net gemaakt) en 
 `apiVersion: database.cinqict.nl/v1`. De spec is zoals je 'm geconfigureerd hebt: 
    <details>
    <summary>Code</summary>
@@ -82,13 +83,14 @@ validatie voldoen. Ook kun je bijv. defaults zetten. Beide gaan we gebruiken. Vo
       apiVersion: database.cinqict.nl/v1
       kind: Postgres
       metadata:
-        name: postgres-sample
+        name: postgres
+        namespace: postgres-example
       spec:
         version: 16 # je kunt nog 15 of 18 proberen om je validatie in werking te zien
    ```
    </details>
-10. Deploy de CRD: `kubectl apply -f ./workshop/kubeconfig.yaml`.
-11. We wijzigen de operator's `Reconcile` functie om te valideren dat hij de CRD oppakt.
+10. Deploy de CR: `kubectl apply -f ./workshop/cr.yaml`.
+11. We wijzigen de operator's `Reconcile` functie om te valideren dat hij de CR oppakt (gebruik onderstaande code).
    <details>
       <summary>Code</summary>
       
@@ -110,4 +112,19 @@ validatie voldoen. Ook kun je bijv. defaults zetten. Beide gaan we gebruiken. Vo
       ```
    </details>
 12. Start de operator lokaal: `KUBECONFIG=./workshop/kubeconfig.yaml make run` of gebruik je IDE om een runconfig 
-te maken. Vergeet de environment variable niet te setten! 
+te maken. Vergeet de environment variable niet te setten!  Als het goed is pakt de operator nu je gedeployde CR op en
+is er een logregel te zien met: "The requested postgres version is 16"
+
+## Stap 2. de `Reconcile`-loop
+De Reconcile-loop is de functie waarbij d e operator het cluster naar de gewenste state brengt. In dit geval gaat hij de 
+postgres-versie voor je managen. We gaan een statefulset aanmaken om de postgres pod te laten starten. 
+
+Laten we bij het begin beginnen. Voor elk Kubernetes-object bestaat een Go-type (bv. `appsv1.StatefulSet` of 
+`corev1.PersistentVolumeClaim`). Op deze wijze kunnen we een StatefulSet opzetten.
+In `internal/controller/postgres_controller.go` vind je de functie `createOrUpdateStatefulSet()`. We 
+gaan deze `func` afmaken:
+1. De StatefulSet is gedefinieerd maar niet ingevuld. Gebruik de naam en namespace van de CR. 
+2. Het object is nu aangemaakt, maar voor de resources gebruiken we `controllerutil.CreateOrUpdate()` om deze objecten als resources aan te maken op het cluster (en niet alleen maar in het geheugen van de operator). Dit bestaat uit 3 stappen:
+   1. Het opgeven van de gewenste state: 
+3. 
+
