@@ -7,19 +7,16 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - services
+  - persistentvolumeclaims
   verbs:
-  - create
   - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
-  - apps
+  - ""
   resources:
-  - statefulsets
+  - services
   verbs:
   - create
   - delete
