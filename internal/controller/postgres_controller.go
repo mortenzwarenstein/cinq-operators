@@ -19,12 +19,15 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -55,10 +58,63 @@ func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if r.MigrationNeeded(postgres) {
+		wait := ctrl.Result{RequeueAfter: 5 * time.Second}
+		log.Info("Migrating Postgres", "from", postgres.Status.CurrentVersion, "to", postgres.Spec.Version)
+
+		if err := r.EnsureClientService(ctx, postgres); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if done, err := r.StartTarget(ctx, postgres); err != nil || !done {
+			return wait, err
+		}
+
+		if done, err := r.StartReplication(ctx, postgres); err != nil || !done {
+			return wait, err
+		}
+
+		if done, err := r.WaitForSync(ctx, postgres); err != nil || !done {
+			return wait, err
+		}
+
+		if done, err := r.FinalSync(ctx, postgres); err != nil || !done {
+			return wait, err
+		}
+
+		if err := r.SwitchTraffic(ctx, postgres); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		if done, err := r.StopReplication(ctx, postgres); err != nil || !done {
+			return wait, err
+		}
+
+		if err := r.RemoveSource(ctx, postgres); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		postgres.Status.CurrentVersion = postgres.Spec.Version
+		if err := r.Status().Update(ctx, postgres); err != nil {
+			return ctrl.Result{}, err
+		}
+		log.Info("Migrated Postgres", "version", postgres.Spec.Version)
+		return ctrl.Result{}, nil
+	}
+
 	result, err := r.createOrUpdateStatefulSet(ctx, postgres)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+
+	// zet de CurrentVersion zodat we deze later nog kunnen uitlezen en kunnen checken of een migration nodig is
+	if postgres.Status.CurrentVersion == 0 {
+		postgres.Status.CurrentVersion = postgres.Spec.Version
+		if err := r.Status().Update(ctx, postgres); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	log.Info("StatefulSet reconciled", "result", result) // created / updated / unchanged
 	return ctrl.Result{}, nil
 }
@@ -67,7 +123,7 @@ func (r *PostgresReconciler) createOrUpdateStatefulSet(ctx context.Context, post
 	// naam en namespace halen we uit de CR
 	sts := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      postgres.Name,
+			Name:      r.activeStatefulSetName(ctx, postgres),
 			Namespace: postgres.Namespace,
 		},
 	}
@@ -83,6 +139,15 @@ func (r *PostgresReconciler) createOrUpdateStatefulSet(ctx context.Context, post
 	})
 }
 
+func (r *PostgresReconciler) activeStatefulSetName(ctx context.Context, postgres *databasev1.Postgres) string {
+	migrated := &appsv1.StatefulSet{}
+	key := types.NamespacedName{Name: fmt.Sprintf("%s-%d", postgres.Name, postgres.Status.CurrentVersion), Namespace: postgres.Namespace}
+	if err := r.Get(ctx, key, migrated); err == nil {
+		return migrated.Name
+	}
+	return postgres.Name
+}
+
 func desiredStatefulSetSpec(postgres *databasev1.Postgres) appsv1.StatefulSetSpec {
 	labels := map[string]string{"app": postgres.Name}
 	replicas := int32(1)
@@ -96,8 +161,9 @@ func desiredStatefulSetSpec(postgres *databasev1.Postgres) appsv1.StatefulSetSpe
 			ObjectMeta: metav1.ObjectMeta{Labels: labels},
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{{
-					Name:  "",
+					Name:  "postgres",
 					Image: fmt.Sprintf("postgres:%d", 0),
+					Args:  []string{"-c", "wal_level=logical"}, // vereist voor logical replication bij migratie
 					Ports: []corev1.ContainerPort{{Name: "postgres", ContainerPort: 5432}},
 					EnvFrom: []corev1.EnvFromSource{{
 						SecretRef: &corev1.SecretEnvSource{
@@ -130,6 +196,8 @@ func (r *PostgresReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&databasev1.Postgres{}).
 		Owns(&appsv1.StatefulSet{}).
+		Owns(&batchv1.Job{}).
+		Owns(&corev1.Service{}).
 		Named("postgres").
 		Complete(r)
 }

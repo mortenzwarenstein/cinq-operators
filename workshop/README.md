@@ -119,12 +119,4 @@ is er een logregel te zien met: "The requested postgres version is 16"
 De Reconcile-loop is de functie waarbij d e operator het cluster naar de gewenste state brengt. In dit geval gaat hij de 
 postgres-versie voor je managen. We gaan een statefulset aanmaken om de postgres pod te laten starten. 
 
-Laten we bij het begin beginnen. Voor elk Kubernetes-object bestaat een Go-type (bv. `appsv1.StatefulSet` of 
-`corev1.PersistentVolumeClaim`). Op deze wijze kunnen we een StatefulSet opzetten.
-In `internal/controller/postgres_controller.go` vind je de functie `createOrUpdateStatefulSet()`. We 
-gaan deze `func` afmaken:
-1. De StatefulSet is gedefinieerd maar niet ingevuld. Gebruik de naam en namespace van de CR. 
-2. Het object is nu aangemaakt, maar voor de resources gebruiken we `controllerutil.CreateOrUpdate()` om deze objecten als resources aan te maken op het cluster (en niet alleen maar in het geheugen van de operator). Dit bestaat uit 3 stappen:
-   1. Het opgeven van de gewenste state: 
-3. 
-
+Op deze wijze kunnen we een StatefulSet creëren. Er staat al wat code klaar om dit te realiseren, maar er ontbreken hier en daar nog wat dingen.

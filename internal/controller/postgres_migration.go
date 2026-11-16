@@ -7,6 +7,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -50,11 +51,23 @@ func (r *PostgresReconciler) MigrationNeeded(postgres *databasev1.Postgres) bool
 }
 
 func (r *PostgresReconciler) EnsureClientService(ctx context.Context, postgres *databasev1.Postgres) error {
-	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: clientServiceName(postgres), Namespace: postgres.Namespace}}
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      clientServiceName(postgres),
+			Namespace: postgres.Namespace,
+		},
+	}
+
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
 		if svc.CreationTimestamp.IsZero() {
 			svc.Spec.Selector = map[string]string{"statefulset.kubernetes.io/pod-name": postgres.Name + "-0"}
-			svc.Spec.Ports = []corev1.ServicePort{{Name: "postgres", Port: 5432, TargetPort: intstr.FromString("postgres")}}
+			svc.Spec.Ports = []corev1.ServicePort{
+				{
+					Name:       "postgres",
+					Port:       5432,
+					TargetPort: intstr.FromString("postgres"),
+				},
+			}
 		}
 		return controllerutil.SetControllerReference(postgres, svc, r.Scheme)
 	})
@@ -63,6 +76,14 @@ func (r *PostgresReconciler) EnsureClientService(ctx context.Context, postgres *
 
 func (r *PostgresReconciler) StartTarget(ctx context.Context, postgres *databasev1.Postgres) (bool, error) {
 	name := targetName(postgres)
+
+	// Een CR met de naam van het target zou onze StatefulSet/Service claimen
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: postgres.Namespace}, &databasev1.Postgres{})
+	if err == nil {
+		return false, fmt.Errorf("target name %s collides with an existing Postgres resource", name)
+	} else if !apierrors.IsNotFound(err) {
+		return false, err
+	}
 
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: postgres.Namespace}}
 	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
@@ -113,10 +134,19 @@ func (r *PostgresReconciler) StopReplication(ctx context.Context, postgres *data
 	return r.runJob(ctx, postgres, "stop-replication", stopReplicationScript)
 }
 
+// RemoveSource ruimt de huidige actieve StatefulSet op. Roep dit aan voordat
+// Status.CurrentVersion naar de nieuwe versie gaat, anders is het target "actief".
 func (r *PostgresReconciler) RemoveSource(ctx context.Context, postgres *databasev1.Postgres) error {
+	src, err := r.activeStatefulSetName(ctx, postgres)
+	if err != nil {
+		return err
+	}
 	objects := []client.Object{
-		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: postgres.Name, Namespace: postgres.Namespace}},
-		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "data-" + postgres.Name + "-0", Namespace: postgres.Namespace}},
+		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: src, Namespace: postgres.Namespace}},
+		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "data-" + src + "-0", Namespace: postgres.Namespace}},
+	}
+	if src != postgres.Name { // de service van de originele StatefulSet is niet van ons
+		objects = append(objects, &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: src, Namespace: postgres.Namespace}})
 	}
 	for _, step := range []string{"replicate", "wait-sync", "final-sync", "stop-replication"} {
 		objects = append(objects, &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: jobName(postgres, step), Namespace: postgres.Namespace}})
@@ -130,11 +160,15 @@ func (r *PostgresReconciler) RemoveSource(ctx context.Context, postgres *databas
 }
 
 func (r *PostgresReconciler) runJob(ctx context.Context, postgres *databasev1.Postgres, step, script string) (bool, error) {
+	src, err := r.activeStatefulSetName(ctx, postgres)
+	if err != nil {
+		return false, err
+	}
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: jobName(postgres, step), Namespace: postgres.Namespace}}
 
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, job, func() error {
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, job, func() error {
 		if job.CreationTimestamp.IsZero() {
-			job.Spec = jobSpec(postgres, script)
+			job.Spec = jobSpec(postgres, src, script)
 		}
 		return controllerutil.SetControllerReference(postgres, job, r.Scheme)
 	})
@@ -156,7 +190,7 @@ func (r *PostgresReconciler) runJob(ctx context.Context, postgres *databasev1.Po
 	return false, nil
 }
 
-func jobSpec(postgres *databasev1.Postgres, script string) batchv1.JobSpec {
+func jobSpec(postgres *databasev1.Postgres, src, script string) batchv1.JobSpec {
 	backoff := int32(0)
 	secret := corev1.LocalObjectReference{Name: postgres.Name + "-credentials"}
 	fromSecret := func(key string) *corev1.EnvVarSource {
@@ -175,7 +209,7 @@ func jobSpec(postgres *databasev1.Postgres, script string) batchv1.JobSpec {
 						{Name: "PGUSER", ValueFrom: fromSecret("POSTGRES_USER")},
 						{Name: "PGPASSWORD", ValueFrom: fromSecret("POSTGRES_PASSWORD")},
 						{Name: "PGDATABASE", ValueFrom: fromSecret("POSTGRES_DB")},
-						{Name: "SRC", Value: podHost(postgres, postgres.Name)},
+						{Name: "SRC", Value: podHost(postgres, src)},
 						{Name: "DST", Value: podHost(postgres, targetName(postgres))},
 					},
 				}},
@@ -198,7 +232,11 @@ func targetStatefulSetSpec(postgres *databasev1.Postgres) appsv1.StatefulSetSpec
 }
 
 func targetName(postgres *databasev1.Postgres) string {
-	return fmt.Sprintf("%s-%d", postgres.Name, postgres.Spec.Version)
+	return versionedName(postgres, postgres.Spec.Version)
+}
+
+func versionedName(postgres *databasev1.Postgres, version int) string {
+	return fmt.Sprintf("%s-%d", postgres.Name, version)
 }
 
 func clientServiceName(postgres *databasev1.Postgres) string { return postgres.Name + "-primary" }
