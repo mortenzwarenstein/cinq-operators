@@ -57,7 +57,6 @@ func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// W
 	if err := r.EnsureClientService(ctx, postgres); err != nil {
 		return ctrl.Result{}, err
 	}
