@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -27,7 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -58,51 +57,16 @@ func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// W
 	if err := r.EnsureClientService(ctx, postgres); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	if r.MigrationNeeded(postgres) {
-		wait := ctrl.Result{RequeueAfter: 5 * time.Second}
-		log.Info("Migrating Postgres", "from", postgres.Status.CurrentVersion, "to", postgres.Spec.Version)
-
-		if done, err := r.StartTarget(ctx, postgres); err != nil || !done {
-			return wait, err
-		}
-
-		if done, err := r.StartReplication(ctx, postgres); err != nil || !done {
-			return wait, err
-		}
-
-		if done, err := r.WaitForSync(ctx, postgres); err != nil || !done {
-			return wait, err
-		}
-
-		if done, err := r.FinalSync(ctx, postgres); err != nil || !done {
-			return wait, err
-		}
-
-		if err := r.SwitchTraffic(ctx, postgres); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		if done, err := r.StopReplication(ctx, postgres); err != nil || !done {
-			return wait, err
-		}
-
-		if err := r.RemoveSource(ctx, postgres); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		postgres.Status.CurrentVersion = postgres.Spec.Version
-		if err := r.Status().Update(ctx, postgres); err != nil {
-			return ctrl.Result{}, err
-		}
-		log.Info("Migrated Postgres", "version", postgres.Spec.Version)
-		return ctrl.Result{}, nil
+		return r.Migrate(ctx, postgres)
 	}
 
-	result, err := r.createOrUpdateStatefulSet(ctx, postgres)
+	ready, err := r.ensureDatabase(ctx, postgres, currentVersion(postgres))
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -115,46 +79,47 @@ func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	log.Info("StatefulSet reconciled", "result", result) // created / updated / unchanged
+	log.Info("StatefulSet reconciled", "ready", ready)
 	return ctrl.Result{}, nil
 }
 
-func (r *PostgresReconciler) createOrUpdateStatefulSet(ctx context.Context, postgres *databasev1.Postgres) (controllerutil.OperationResult, error) {
-	// naam en namespace halen we uit de CR
-	sts := &appsv1.StatefulSet{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.activeStatefulSetName(ctx, postgres),
-			Namespace: postgres.Namespace,
-		},
+func (r *PostgresReconciler) ensureDatabase(ctx context.Context, postgres *databasev1.Postgres, version int) (bool, error) {
+	name := versionedName(postgres, version)
+	if err := r.ensureHeadlessService(ctx, postgres, name); err != nil {
+		return false, err
 	}
 
-	return controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
+	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: postgres.Namespace}}
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
 		if sts.CreationTimestamp.IsZero() {
-			sts.Spec = desiredStatefulSetSpec(postgres)
+			sts.Spec = statefulSetSpec(postgres, version)
 		}
-
-		sts.Spec.Template.Spec.Containers[0].Image = fmt.Sprintf("postgres:%d", postgres.Spec.Version)
-
 		return controllerutil.SetControllerReference(postgres, sts, r.Scheme)
-	})
-}
-
-func (r *PostgresReconciler) activeStatefulSetName(ctx context.Context, postgres *databasev1.Postgres) string {
-	migrated := &appsv1.StatefulSet{}
-	key := types.NamespacedName{Name: fmt.Sprintf("%s-%d", postgres.Name, postgres.Status.CurrentVersion), Namespace: postgres.Namespace}
-	if err := r.Get(ctx, key, migrated); err == nil {
-		return migrated.Name
+	}); err != nil {
+		return false, err
 	}
-	return postgres.Name
+	return sts.Status.ReadyReplicas == 1, nil
 }
 
-func desiredStatefulSetSpec(postgres *databasev1.Postgres) appsv1.StatefulSetSpec {
-	labels := map[string]string{"app": postgres.Name}
+func (r *PostgresReconciler) ensureHeadlessService(ctx context.Context, postgres *databasev1.Postgres, name string) error {
+	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: postgres.Namespace}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
+		svc.Spec.ClusterIP = corev1.ClusterIPNone
+		svc.Spec.Selector = map[string]string{"app": name}
+		svc.Spec.Ports = []corev1.ServicePort{{Name: "postgres", Port: 5432, TargetPort: intstr.FromString("postgres")}}
+		return controllerutil.SetControllerReference(postgres, svc, r.Scheme)
+	})
+	return err
+}
+
+func statefulSetSpec(postgres *databasev1.Postgres, version int) appsv1.StatefulSetSpec {
+	name := fmt.Sprintf("%s-%d", postgres.Name, version)
+	labels := map[string]string{"app": name}
 	replicas := int32(1)
 	pvc := getPVC()
 
 	return appsv1.StatefulSetSpec{
-		ServiceName: postgres.Name,
+		ServiceName: name,
 		Replicas:    &replicas,
 		Selector:    &metav1.LabelSelector{MatchLabels: labels},
 		Template: corev1.PodTemplateSpec{
@@ -162,7 +127,7 @@ func desiredStatefulSetSpec(postgres *databasev1.Postgres) appsv1.StatefulSetSpe
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{{
 					Name:  "postgres",
-					Image: fmt.Sprintf("postgres:%d", 0),
+					Image: fmt.Sprintf("postgres:%d", version),
 					Args:  []string{"-c", "wal_level=logical"}, // vereist voor logical replication bij migratie
 					Ports: []corev1.ContainerPort{{Name: "postgres", ContainerPort: 5432}},
 					EnvFrom: []corev1.EnvFromSource{{
