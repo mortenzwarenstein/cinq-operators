@@ -137,10 +137,7 @@ func (r *PostgresReconciler) StopReplication(ctx context.Context, postgres *data
 // RemoveSource ruimt de huidige actieve StatefulSet op. Roep dit aan voordat
 // Status.CurrentVersion naar de nieuwe versie gaat, anders is het target "actief".
 func (r *PostgresReconciler) RemoveSource(ctx context.Context, postgres *databasev1.Postgres) error {
-	src, err := r.activeStatefulSetName(ctx, postgres)
-	if err != nil {
-		return err
-	}
+	src := r.activeStatefulSetName(ctx, postgres)
 	objects := []client.Object{
 		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: src, Namespace: postgres.Namespace}},
 		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "data-" + src + "-0", Namespace: postgres.Namespace}},
@@ -160,13 +157,10 @@ func (r *PostgresReconciler) RemoveSource(ctx context.Context, postgres *databas
 }
 
 func (r *PostgresReconciler) runJob(ctx context.Context, postgres *databasev1.Postgres, step, script string) (bool, error) {
-	src, err := r.activeStatefulSetName(ctx, postgres)
-	if err != nil {
-		return false, err
-	}
+	src := r.activeStatefulSetName(ctx, postgres)
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: jobName(postgres, step), Namespace: postgres.Namespace}}
 
-	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, job, func() error {
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, job, func() error {
 		if job.CreationTimestamp.IsZero() {
 			job.Spec = jobSpec(postgres, src, script)
 		}

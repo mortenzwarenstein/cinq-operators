@@ -58,13 +58,13 @@ func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if err := r.EnsureClientService(ctx, postgres); err != nil {
+		return ctrl.Result{}, err
+	}
+
 	if r.MigrationNeeded(postgres) {
 		wait := ctrl.Result{RequeueAfter: 5 * time.Second}
 		log.Info("Migrating Postgres", "from", postgres.Status.CurrentVersion, "to", postgres.Spec.Version)
-
-		if err := r.EnsureClientService(ctx, postgres); err != nil {
-			return ctrl.Result{}, err
-		}
 
 		if done, err := r.StartTarget(ctx, postgres); err != nil || !done {
 			return wait, err
