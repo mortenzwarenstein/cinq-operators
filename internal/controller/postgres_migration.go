@@ -48,10 +48,6 @@ const stopReplicationScript = waitForHosts + `
 psql -h "$DST" -v ON_ERROR_STOP=1 -c 'DROP SUBSCRIPTION migration'
 `
 
-func (r *PostgresReconciler) MigrationNeeded(postgres *databasev1.Postgres) bool {
-	return postgres.Status.CurrentVersion != 0 && postgres.Status.CurrentVersion != postgres.Spec.Version
-}
-
 func (r *PostgresReconciler) Migrate(ctx context.Context, postgres *databasev1.Postgres) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	wait := ctrl.Result{RequeueAfter: 5 * time.Second}
