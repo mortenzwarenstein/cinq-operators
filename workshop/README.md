@@ -73,7 +73,7 @@ validatie voldoen. Ook kun je bijv. defaults zetten. Beide gaan we gebruiken. Vo
    ```
    </details>
 4. Almost there. Laten we de daadwerkelijke CRD genereren met `make install`.
-5. Tijd om een minimale CR (CustomResource, CRD is de blauwprint, de CR is een instantie daarvan) op te zetten.
+5. Tijd om een minimale CR (CustomResource, CRD is de blauwprint, de CR is een instantie daarvan) op te zetten, bijvoorbeeld in `config/samples/postgres_crd.yaml`.
    `kind: Postgres` (deze hebben we net gemaakt) en
    `apiVersion: database.cinqict.nl/v1`. De spec is zoals je 'm geconfigureerd hebt:
    <details>
