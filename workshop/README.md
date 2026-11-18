@@ -17,7 +17,7 @@ In deze workshop gaan we aan de slag met een database upgrade. We migreren Postg
 ## Installatie
 
 1. Clone deze repo.
-2. Run `./workshop/setup.sh` vanaf de repo root.
+2. Run ./workshop/setup.sh` vanaf de repo root.
 3. `setup.sh` maakt een eigen kubeconfig voor je kind-cluster aan. Zet de kubeconfig-env: `export KUBECONFIG=$PWD/workshop/kubeconfig.yaml` (vanuit de root van de repo, en in elke
 nieuwe terminal-sessie).
 4. Controleer of het kind-cluster is gestart: `kubectl get pods -A` (er moeten pods verschijnen).
@@ -56,9 +56,7 @@ backticks te zetten. Hiervoor kun je `` `json:"<veldnaam>"` `` achter het betref
 je op een simpele manier je CRD valideren. Kubernetes/je operator zal de CRD's ook niet accepteren als ze niet aan de 
 validatie voldoen. Ook kun je bijv. defaults zetten. Beide gaan we gebruiken. Voor nu supporten we alleen versies 16 en 
 17 voor `postgres`. De versie is verplicht (`// +required`) en we geven een min en max versie mee 
-(`// +kubebuilder:validation:Minimum=16` en `Maximum` voor de maximale versie).
-
-Ook voorkomen we dat iemand de versie verlaagt: een oudere postgres kan de data van een nieuwere niet lezen. Dat kan met een CEL-regel (zie de code hieronder).
+(`// +Kubebuilder:validation:Minimum=16` en `Maximum` voor de maximale versie).
 
    <details>
    <summary>Code</summary>
@@ -67,10 +65,8 @@ Ook voorkomen we dat iemand de versie verlaagt: een oudere postgres kan de data 
    type PostgresSpec struct { // d.m.v. Kubebuilder annotaties kun je validatie aan je velden toevoegen
        // De bovenste comment-regels vormen de beschrijving van je veld in de CRD. We accepteren alleen v16 en v17 en het
        // veld is verplicht
-       // +kubebuilder:validation:Minimum=16
-       // +kubebuilder:validation:Maximum=17
-       // Downgraden kan niet: een oudere postgres kan de data van een nieuwere niet lezen
-       // +kubebuilder:validation:XValidation:rule="self >= oldSelf",message="downgrading postgres is not supported"
+       // +Kubebuilder:validation:Minimum=16
+       // +Kubebuilder:validation:Maximum=17
        // +required
        Version int `json:"version"`
    }
@@ -179,7 +175,8 @@ moet je twee dingen doen:
    </details>
 
 4. Als laatste moeten we `ensureDatabase` ook echt aanroepen vanuit `Reconcile`, anders gebeurt er nog niks. Vervang de `TODO (stap 2)` door een call met `postgres.Spec.Version`. Geeft hij een error terug? Dan geef je die terug aan controller-runtime (gewoon, door een leeg `Result` terug te geven), dan probeert 'ie het later vanzelf opnieuw. 
- De StatefulSet staat in `.Owns(...)` van `SetupWithManager`, dus als de database klaar is triggert k8s vanzelf een nieuwe reconcile. Je hoeft dus niet zelf te pollen met `RequeueAfter`.
+ Is de database nog niet klaar? Dan geef je ook een Result terug, maar met `RequeueAfter: 5 * time.Second` (en geven we
+ de database iets langer de tijd). 
 
    <details>
    <summary>Code</summary>
@@ -189,14 +186,15 @@ moet je twee dingen doen:
    if err != nil {
        return ctrl.Result{}, err
    }
-   log.Info("StatefulSet reconciled", "ready", ready)
+   if !ready {
+       log.Info("Waiting for Postgres to become ready", "name", postgres.Name)
+       return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+   }
    ```
 
    </details>
 
-5. De operator maakt StatefulSets aan, dus hij heeft daar rechten voor nodig. Die regel je met een RBAC-marker boven de `Reconcile`: `// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete` (staat er al). Met `make manifests` komt dit in `config/rbac/role.yaml`.
-
-6. Tijd om het te testen. Laad je CRD en run de operator lokaal met `make install run`. Apply daarna je CR uit stap 1 (`kubectl apply -f config/samples/postgres_crd.yaml`) en kijk met `kubectl get statefulset,pods -n postgres-example` of je database opkomt.
+5. Tijd om het te testen. Laad je CRD en run de operator lokaal met `make install run`. Apply daarna je CR uit stap 1 (`kubectl apply -f config/samples/postgres_crd.yaml`) en kijk met `kubectl get statefulset,pods -n postgres-example` of je database opkomt.
  Verbind er mee zoals beschreven in [Verbinden met de database](#verbinden-met-de-database) en draai `SELECT version();`. Als het goed is zie je Postgres 16. 
  Verwijder je de CR? Dan zie je dat de StatefulSet en de service vanzelf opgeruimd worden. Dat komt omdat we de owner-references
  hebben gezet, waardoor k8s garbage collection zijn werk kan doen.
@@ -208,6 +206,7 @@ Nu draait de database, maar de operator weet nog niet wat hij moet doen als je d
 
 2. Check daarna of er een migratie nodig is. Dat is zo als `Status.CurrentVersion` gezet is en afwijkt van `Spec.Version`.
    - Zo ja: roep `r.Migrate` aan en geef het resultaat terug. `Migrate` plant zichzelf opnieuw in (`RequeueAfter`) zolang de migratie bezig is, dus je hoeft zelf niet te wachten.
+     - Je kunt hier nog een stapje verder in gaan door te checken of de versie hoger is. Dit zou je zelfs in de CRD kunnen valideren, maar voor nu slaan we dat even over.
    - Zo nee: ga gewoon door met `ensureDatabase`.
 
 3. Pas je `ensureDatabase`-aanroep uit stap 2 aan. Tijdens een migratie draait de oude database nog gewoon door, dus je moet hem aanroepen met de versie die *nu* draait (de helper `currentVersion` regelt dit voor je) in plaats van `Spec.Version`.
@@ -225,6 +224,10 @@ Nu draait de database, maar de operator weet nog niet wat hij moet doen als je d
    if err != nil {
        return ctrl.Result{}, err
    }
+   if !ready {
+       return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+   }
+
    // onthoud wat er draait
    if postgres.Status.CurrentVersion == 0 {
        postgres.Status.CurrentVersion = postgres.Spec.Version
@@ -232,11 +235,8 @@ Nu draait de database, maar de operator weet nog niet wat hij moet doen als je d
            return ctrl.Result{}, err
        }
    }
-
-   log.Info("StatefulSet reconciled", "ready", ready)
-   return ctrl.Result{}, nil
    ```
 
    </details>
 
-4. Laten we het in actie zien. Draai de operator weer, zet in je CR `version: 17` en apply hem opnieuw. Volg wat er gebeurt met `kubectl get statefulset,jobs,pods -n postgres-example -w`. Als het goed is komt er een tweede database (v17) naast de oude te staan, wordt de data gemigreerd en blijft de client service al die tijd bereikbaar. Verbind weer (zie [Verbinden met de database](#verbinden-met-de-database)), run `SELECT version();` en je zou nu Postgres v17 moeten zien.
+4. Laten we het in actie zien. Draai de operator weer, zet in je CR `version: v17` en apply hem opnieuw. Volg wat er gebeurt met `kubectl get statefulset,jobs,pods -n postgres-example -w`. Als het goed is komt er een tweede database (v17) naast de oude te staan, wordt de data gemigreerd en blijft de client service al die tijd bereikbaar. Verbind weer (zie [Verbinden met de database](#verbinden-met-de-database)), run `SELECT version();` en je zou nu Postgres v17 moeten zien.
