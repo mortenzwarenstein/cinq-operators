@@ -1,0 +1,136 @@
+/*
+Copyright YEAR.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+	"fmt"
+
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
+
+	databasev1 "cinqict.nl/operators/api/v1"
+)
+
+// PostgresReconciler reconciles a Postgres object
+type PostgresReconciler struct {
+	client.Client
+	Scheme *runtime.Scheme
+}
+
+// +kubebuilder:rbac:groups=database.cinqict.nl,resources=postgres,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=database.cinqict.nl,resources=postgres/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=database.cinqict.nl,resources=postgres/finalizers,verbs=update
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+
+// Reconcile is part of the main kubernetes reconciliation loop which aims to
+// move the current state of the cluster closer to the desired state.
+func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	// haal onze eigen Postgres CR op uit het cluster
+	postgres := &databasev1.Postgres{}
+	if err := r.Get(ctx, req.NamespacedName, postgres); err != nil {
+		// Als we geen CR kunnen vinden doen we niets (en geven we ook geen errors terug)
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// We zetten een client service op, zodat de pods op een vast punt bereikbaar zijn
+	if err := r.EnsureClientService(ctx, postgres); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// TODO (stap 2): zorg dat de database draait.
+
+	// TODO (stap 3): is er een migratie nodig?
+	//   - Zo ja: roep r.Migrate aan en geef het resultaat terug. Migrate Requeuet zichzelf voor de volgende Reconcile-loop.
+	//   - Zo nee: ga door met ensureDatabase.
+
+	// TODO (stap 3): onthoud wat er draait.
+	//   Zet Status.CurrentVersion op Spec.Version als die nog niet gezet is (0) en sla hem op met
+	//   r.Status().Update. Waarom moet dit in de status en niet in de spec?
+
+	log.Info("Reconciled Postgres", "name", postgres.Name)
+	return ctrl.Result{}, nil
+}
+
+func (r *PostgresReconciler) ensureDatabase(ctx context.Context, postgres *databasev1.Postgres, version int) (bool, error) {
+	name := versionedName(postgres, version)
+	if err := r.ensureHeadlessService(ctx, postgres, name); err != nil {
+		return false, err
+	}
+
+	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: postgres.Namespace}}
+
+	//_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
+		// TODO: zet de Spec alleen als de StatefulSet nog niet bestaat (sts.CreationTimestamp.IsZero()).
+		// De meeste velden van een StatefulSet zijn immutable.
+		// sts.Spec = statefulSetSpec(postgres, version)
+		//
+		// return TODO: maak de CR eigenaar zodat opruimen door k8s gedaan wordt (gc). Gebruik controllerutil.SetControllerReference
+		//})
+		//if err != nil {
+		//	return false, err
+		//}
+
+		// TODO: is de StatefulSet klaar? (sts.Status.ReadyReplicas == 1), nil
+		//return nil
+	//}
+
+	// Placeholders voor golang linting
+	_ = controllerutil.CreateOrUpdate
+	_ = sts
+
+	return false, fmt.Errorf("ensureDatabase is nog niet geïmplementeerd")
+}
+
+func statefulSetSpec(postgres *databasev1.Postgres, version int) appsv1.StatefulSetSpec {
+	name := fmt.Sprintf("%s-%d", postgres.Name, version)
+	//labels := map[string]string{"app": name}
+	//replicas := TODO: eentje lijkt me wel genoeg toch? (let op *int32)
+	//pgContainer := postgresContainer(postgres, version)
+	//pvc := getPVC()
+
+	return appsv1.StatefulSetSpec{
+		ServiceName: name,
+		//Replicas:    TODO: zet het aantal replicas,
+		//Selector:    &metav1.LabelSelector{  TODO: Match de labels aan de matchende labels },
+		Template: corev1.PodTemplateSpec{
+			//ObjectMeta: TODO: Zet de labels
+			//Spec: TODO: Zet de PodSpec voor de statefulset (In dit geval zijn dat alleen de containers ⬆️😉)
+		},
+		VolumeClaimTemplates: []corev1.PersistentVolumeClaim{getPVC()},
+	}
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *PostgresReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&databasev1.Postgres{}).
+		Owns(&appsv1.StatefulSet{}).
+		Owns(&batchv1.Job{}).
+		Owns(&corev1.Service{}).
+		Named("postgres").
+		Complete(r)
+}
