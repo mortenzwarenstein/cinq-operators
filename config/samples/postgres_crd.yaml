@@ -4,4 +4,4 @@ metadata:
   name: postgres
   namespace: postgres-example
 spec:
-  version: 17
+  version: 16

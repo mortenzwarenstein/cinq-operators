@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -61,13 +62,17 @@ func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	if r.MigrationNeeded(postgres) {
+	if postgres.Status.CurrentVersion != 0 && postgres.Status.CurrentVersion != postgres.Spec.Version {
 		return r.Migrate(ctx, postgres)
 	}
 
 	ready, err := r.ensureDatabase(ctx, postgres, currentVersion(postgres))
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if !ready {
+		log.Info("Waiting for Postgres to become ready", "name", postgres.Name)
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	// zet de CurrentVersion zodat we deze later nog kunnen uitlezen en kunnen checken of een migration nodig is
@@ -78,7 +83,7 @@ func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	log.Info("StatefulSet reconciled", "ready", ready)
+	log.Info("Reconciled Postgres", "name", postgres.Name)
 	return ctrl.Result{}, nil
 }
 

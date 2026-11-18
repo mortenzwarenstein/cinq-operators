@@ -40,15 +40,10 @@ spec:
             description: spec defines the desired state of Postgres
             properties:
               version:
-                description: |-
-                  We accepteren alleen v16 en 17 en het veld is verplicht
-                  Downgraden kan niet: een oudere postgres kan de data van een nieuwere niet lezen
+                description: We accepteren alleen v16 en 17 en het veld is verplicht
                 maximum: 17
                 minimum: 16
                 type: integer
-                x-kubernetes-validations:
-                - message: downgrading postgres is not supported
-                  rule: self >= oldSelf
             required:
             - version
             type: object
