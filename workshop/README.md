@@ -17,7 +17,7 @@ In deze workshop gaan we aan de slag met een database upgrade. We migreren Postg
 ## Installatie
 
 1. Clone deze repo.
-2. Run ./workshop/setup.sh` vanaf de repo root.
+2. Run `./workshop/setup.sh` vanaf de repo root.
 3. `setup.sh` maakt een eigen kubeconfig voor je kind-cluster aan. Zet de kubeconfig-env: `export KUBECONFIG=$PWD/workshop/kubeconfig.yaml` (vanuit de root van de repo, en in elke
 nieuwe terminal-sessie).
 4. Controleer of het kind-cluster is gestart: `kubectl get pods -A` (er moeten pods verschijnen).

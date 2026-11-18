@@ -1,0 +1,2 @@
+resources:
+  - bases/database.cinqict.nl_postgres.yaml
