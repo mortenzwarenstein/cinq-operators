@@ -84,18 +84,18 @@ func (r *PostgresReconciler) ensureDatabase(ctx context.Context, postgres *datab
 	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: postgres.Namespace}}
 
 	//_, err := controllerutil.CreateOrUpdate(ctx, r.Client, sts, func() error {
-		// TODO: zet de Spec alleen als de StatefulSet nog niet bestaat (sts.CreationTimestamp.IsZero()).
-		// De meeste velden van een StatefulSet zijn immutable.
-		// sts.Spec = statefulSetSpec(postgres, version)
-		//
-		// return TODO: maak de CR eigenaar zodat opruimen door k8s gedaan wordt (gc). Gebruik controllerutil.SetControllerReference
-		//})
-		//if err != nil {
-		//	return false, err
-		//}
+	// TODO: zet de Spec alleen als de StatefulSet nog niet bestaat (sts.CreationTimestamp.IsZero()).
+	// De meeste velden van een StatefulSet zijn immutable.
+	// sts.Spec = statefulSetSpec(postgres, version)
+	//
+	// return TODO: maak de CR eigenaar zodat opruimen door k8s gedaan wordt (gc). Gebruik controllerutil.SetControllerReference
+	//})
+	//if err != nil {
+	//	return false, err
+	//}
 
-		// TODO: is de StatefulSet klaar? (sts.Status.ReadyReplicas == 1), nil
-		//return nil
+	// TODO: is de StatefulSet klaar? (sts.Status.ReadyReplicas == 1), nil
+	//return nil
 	//}
 
 	// Placeholders voor golang linting
@@ -120,7 +120,9 @@ func statefulSetSpec(postgres *databasev1.Postgres, version int) appsv1.Stateful
 			//ObjectMeta: TODO: Zet de labels
 			//Spec: TODO: Zet de PodSpec voor de statefulset (In dit geval zijn dat alleen de containers ⬆️😉)
 		},
-		VolumeClaimTemplates: []corev1.PersistentVolumeClaim{getPVC()},
+		VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
+			// TODO: Zet de pvc
+		},
 	}
 }
 
