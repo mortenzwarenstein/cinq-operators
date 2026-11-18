@@ -1,51 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "Setting up operator workshop environment"
-echo "### KUBEBUILDER (1/) ###"
-
 WORKSHOP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$WORKSHOP_DIR")"
-KUBEBUILDER="kubebuilder"
-KUBEBUILDER_VERSION="4.16.0"
-BIN_PATH="$REPO_ROOT/$KUBEBUILDER"
+CLUSTER_NAME="operator-workshop"
+KUBECONFIG_PATH="$WORKSHOP_DIR/kubeconfig.yaml"
 
-if [ ! -f "$BIN_PATH" ]; then
-  echo "Downloading kubebuilder bin"
-  curl -fL -o "$BIN_PATH" "https://go.kubebuilder.io/dl/${KUBEBUILDER_VERSION}/$(go env GOOS)/$(go env GOARCH)"
-  chmod +x "$BIN_PATH"
-  echo "Downloaded kubebuilder bin"
-fi
+echo "Setting up operator workshop environment"
 
-cd "$REPO_ROOT"
-
-if [ ! -f "./go.sum" ]; then
-  ./kubebuilder init --repo cinqict.nl/operators --domain cinqict.nl
-  rm -rf ./kubebuilder
+echo "### KIND CLUSTER (1/2) ###"
+if kind get clusters | grep -qx "$CLUSTER_NAME"; then
+  echo "Cluster $CLUSTER_NAME already exists, skipping creation"
 else
-  echo "Project is already initialized, skipping step"
+  kind create cluster --name "$CLUSTER_NAME" --wait 120s
 fi
+kind get kubeconfig --name "$CLUSTER_NAME" > "$KUBECONFIG_PATH"
 
-echo "### KIND CLUSTER (2/) ###"
-docker compose -f "$WORKSHOP_DIR/docker-compose.yaml" run --rm kind
-
-echo "### DEPLOYING DB ###"
-export KUBECONFIG="$WORKSHOP_DIR/kubeconfig.yaml"
-
-echo "Waiting for the cluster to be ready"
-cluster_ready=false
-for i in $(seq 1 60); do
-  if kubectl get nodes >/dev/null 2>&1; then
-    cluster_ready=true
-    break
-  fi
-  echo "Retrying ($i/60)"
-  sleep 2
-done
-
-if [ "$cluster_ready" != true ]; then
-  echo "Cluster did not become ready after 120s, aborting" >&2
-  exit 1
-fi
-
+echo "### NAMESPACE AND CREDENTIALS (2/2) ###"
+export KUBECONFIG="$KUBECONFIG_PATH"
 kubectl apply -f "$WORKSHOP_DIR/postgres.yaml"
+
+echo "Done. Run: export KUBECONFIG=$KUBECONFIG_PATH"

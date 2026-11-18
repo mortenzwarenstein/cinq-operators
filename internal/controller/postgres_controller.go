@@ -23,10 +23,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -44,6 +42,7 @@ type PostgresReconciler struct {
 // +kubebuilder:rbac:groups=database.cinqict.nl,resources=postgres,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=database.cinqict.nl,resources=postgres/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=database.cinqict.nl,resources=postgres/finalizers,verbs=update
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -100,17 +99,6 @@ func (r *PostgresReconciler) ensureDatabase(ctx context.Context, postgres *datab
 	return sts.Status.ReadyReplicas == 1, nil
 }
 
-func (r *PostgresReconciler) ensureHeadlessService(ctx context.Context, postgres *databasev1.Postgres, name string) error {
-	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: postgres.Namespace}}
-	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, svc, func() error {
-		svc.Spec.ClusterIP = corev1.ClusterIPNone
-		svc.Spec.Selector = map[string]string{"app": name}
-		svc.Spec.Ports = []corev1.ServicePort{{Name: "postgres", Port: 5432, TargetPort: intstr.FromString("postgres")}}
-		return controllerutil.SetControllerReference(postgres, svc, r.Scheme)
-	})
-	return err
-}
-
 func statefulSetSpec(postgres *databasev1.Postgres, version int) appsv1.StatefulSetSpec {
 	name := fmt.Sprintf("%s-%d", postgres.Name, version)
 	labels := map[string]string{"app": name}
@@ -124,34 +112,10 @@ func statefulSetSpec(postgres *databasev1.Postgres, version int) appsv1.Stateful
 		Template: corev1.PodTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{Labels: labels},
 			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{
-					Name:  "postgres",
-					Image: fmt.Sprintf("postgres:%d", version),
-					Args:  []string{"-c", "wal_level=logical"}, // vereist voor logical replication bij migratie
-					Ports: []corev1.ContainerPort{{Name: "postgres", ContainerPort: 5432}},
-					EnvFrom: []corev1.EnvFromSource{{
-						SecretRef: &corev1.SecretEnvSource{
-							LocalObjectReference: corev1.LocalObjectReference{Name: postgres.Name + "-credentials"},
-						},
-					}},
-					Env:          []corev1.EnvVar{{Name: "PGDATA", Value: "/var/lib/postgresql/data/pgdata"}},
-					VolumeMounts: []corev1.VolumeMount{{Name: "data", MountPath: "/var/lib/postgresql/data"}},
-				}},
+				Containers: []corev1.Container{postgresContainer(postgres, version)},
 			},
 		},
 		VolumeClaimTemplates: []corev1.PersistentVolumeClaim{pvc},
-	}
-}
-
-func getPVC() corev1.PersistentVolumeClaim {
-	return corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{Name: "data"},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
-			},
-		},
 	}
 }
 
