@@ -56,6 +56,7 @@ func (r *PostgresReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// We zetten een client service op, zodat de pods op een vast punt bereikbaar zijn
 	if err := r.EnsureClientService(ctx, postgres); err != nil {
 		return ctrl.Result{}, err
 	}

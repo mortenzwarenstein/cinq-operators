@@ -8,12 +8,7 @@ KUBECONFIG_PATH="$WORKSHOP_DIR/kubeconfig.yaml"
 echo "Setting up operator workshop environment"
 
 echo "### KIND CLUSTER (1/2) ###"
-if kind get clusters | grep -qx "$CLUSTER_NAME"; then
-  echo "Cluster $CLUSTER_NAME already exists, skipping creation"
-else
-  kind create cluster --name "$CLUSTER_NAME" --wait 120s
-fi
-kind get kubeconfig --name "$CLUSTER_NAME" > "$KUBECONFIG_PATH"
+docker compose -f "$WORKSHOP_DIR/docker-compose.yaml" run --rm kind
 
 echo "### NAMESPACE AND CREDENTIALS (2/2) ###"
 export KUBECONFIG="$KUBECONFIG_PATH"
