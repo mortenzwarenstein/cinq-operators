@@ -56,7 +56,7 @@ backticks te zetten. Hiervoor kun je `` `json:"<veldnaam>"` `` achter het betref
 je op een simpele manier je CRD valideren. Kubernetes/je operator zal de CRD's ook niet accepteren als ze niet aan de 
 validatie voldoen. Ook kun je bijv. defaults zetten. Beide gaan we gebruiken. Voor nu supporten we alleen versies 16 en 
 17 voor `postgres`. De versie is verplicht (`// +required`) en we geven een min en max versie mee 
-(`// +Kubebuilder:validation:Minimum=16` en `Maximum` voor de maximale versie).
+(`// +kubebuilder:validation:Minimum=16` en `Maximum` voor de maximale versie).
 
    <details>
    <summary>Code</summary>
@@ -65,15 +65,15 @@ validatie voldoen. Ook kun je bijv. defaults zetten. Beide gaan we gebruiken. Vo
    type PostgresSpec struct { // d.m.v. Kubebuilder annotaties kun je validatie aan je velden toevoegen
        // De bovenste comment-regels vormen de beschrijving van je veld in de CRD. We accepteren alleen v16 en v17 en het
        // veld is verplicht
-       // +Kubebuilder:validation:Minimum=16
-       // +Kubebuilder:validation:Maximum=17
+       // +kubebuilder:validation:Minimum=16
+       // +kubebuilder:validation:Maximum=17
        // +required
        Version int `json:"version"`
    }
    ```
    </details>
 4. Almost there. Laten we de daadwerkelijke CRD genereren met `make install`.
-5. Tijd om een minimale CR (CustomResource, CRD is de blauwprint, de CR is een instantie daarvan) op te zetten, bijvoorbeeld in `config/samples/postgres_crd.yaml`.
+5. Tijd om een minimale CR (CustomResource, CRD is de blauwprint, de CR is een instantie daarvan) op te zetten, bijvoorbeeld in `config/samples/postgres_cr.yaml`.
    `kind: Postgres` (deze hebben we net gemaakt) en
    `apiVersion: database.cinqict.nl/v1`. De spec is zoals je 'm geconfigureerd hebt:
    <details>
@@ -115,6 +115,7 @@ Er staat al wat code klaar om dit te realiseren, maar er ontbreken hier en daar 
        name := fmt.Sprintf("%s-%d", postgres.Name, version)
        labels := map[string]string{"app": name}
        replicas := int32(1)
+       pvc := getPVC()
 
        return appsv1.StatefulSetSpec{
            ServiceName: name,
@@ -126,7 +127,13 @@ Er staat al wat code klaar om dit te realiseren, maar er ontbreken hier en daar 
                    Containers: []corev1.Container{postgresContainer(postgres, version)},
                },
            },
-           VolumeClaimTemplates: []corev1.PersistentVolumeClaim{getPVC()},
+           VolumeClaimTemplates: []corev1.PersistentVolumeClaim{
+               pvc,
+           },
+           PersistentVolumeClaimRetentionPolicy: &appsv1.StatefulSetPersistentVolumeClaimRetentionPolicy{
+               WhenDeleted: appsv1.DeletePersistentVolumeClaimRetentionPolicyType,
+               WhenScaled:  appsv1.RetainPersistentVolumeClaimRetentionPolicyType,
+           },
        }
    }
    ```
@@ -197,7 +204,10 @@ moet je twee dingen doen:
 5. Tijd om het te testen. Laad je CRD en run de operator lokaal met `make install run`. Apply daarna je CR uit stap 1 (`kubectl apply -f config/samples/postgres_crd.yaml`) en kijk met `kubectl get statefulset,pods -n postgres-example` of je database opkomt.
  Verbind er mee zoals beschreven in [Verbinden met de database](#verbinden-met-de-database) en draai `SELECT version();`. Als het goed is zie je Postgres 16. 
  Verwijder je de CR? Dan zie je dat de StatefulSet en de service vanzelf opgeruimd worden. Dat komt omdat we de owner-references
- hebben gezet, waardoor k8s garbage collection zijn werk kan doen.
+ hebben gezet, waardoor k8s garbage collection zijn werk kan doen. De PVC's zijn hier een uitzondering op: StatefulSets
+ bewaren die standaard ook als de StatefulSet verwijderd wordt. Met `PersistentVolumeClaimRetentionPolicy` ruimen we ze
+ in dit voorbeeld ook op bij verwijderen van de StatefulSet (`WhenDeleted: Delete`). 
+ Dit geldt dus ook als na een migratie de StatefulSet van de oude versie wordt opgeruimd.
 
 ## Stap 3: Migreren zonder downtime
 Nu draait de database, maar de operator weet nog niet wat hij moet doen als je de versie in de CR aanpast. Daar gaan we nu voor zorgen. Het lastige is dat de operator moet onthouden welke versie er *nu* draait, terwijl `Spec.Version` al de *nieuwe* versie is.
